@@ -180,11 +180,31 @@ def process_single_account(username, password):
             take_screenshot(sb, "Error_1005_节点被封锁", username)
             sys.exit(1)
 
-        if is_cloudflare_interstitial(sb):
-            if not bypass_cloudflare_interstitial(sb):
-                return 
-            time.sleep(3) 
-            
+        # ================== 🌟 CF 绕过逻辑（重试后跳过账号） ==================
+        cf_blocked = is_cloudflare_interstitial(sb)
+        if cf_blocked:
+            if bypass_cloudflare_interstitial(sb):
+                print("    ✅ CF 首次绕过成功。")
+            else:
+                print("    ❌ 首次绕过 CF 失败，等待 5 秒后重试登录流程...")
+                time.sleep(5)
+                sb.uc_open_with_reconnect(CONFIG['target_url'], reconnect_time=8)
+                time.sleep(4)
+
+                if is_cloudflare_interstitial(sb):
+                    if not bypass_cloudflare_interstitial(sb):
+                        print("    ❌ 重试后仍然无法绕过 Cloudflare，跳过当前账号。")
+                        take_screenshot(sb, "CF_绕过失败跳过账号", username)
+                        return  # 跳过当前账号，继续下一个
+                    else:
+                        print("    ✅ 重试后 CF 已放行。")
+                else:
+                    print("    ✅ 重试后未检测到 CF 阻挡，可以继续。")
+        else:
+            print("    🟢 未检测到 CF 5秒盾。")
+        # =================================================================
+
+        # 处理可能出现的 Turnstile 验证
         handle_turnstile_verification(sb)
         time.sleep(3)
         take_screenshot(sb, "2_准备填写表单", username)
@@ -196,12 +216,10 @@ def process_single_account(username, password):
             for login_attempt in range(2):
                 print(f"    ▶ 开始第 {login_attempt + 1} 次尝试登录...")
                 
-                # ==================================================
-                # 🌟 优化：验证码最多尝试 10 次，失败则退出程序
-                # ==================================================
-                captcha_success = False # 设定一个标记，记录验证码是否成功获取
+                # 验证码最多尝试 10 次，全部失败则退出程序
+                captcha_success = False 
                 
-                for captcha_attempt in range(10): # 循环 10 次
+                for captcha_attempt in range(10):
                     sb.wait_for_element(CONFIG['captcha_img_selector'], timeout=10)
                     img_src = sb.get_attribute(CONFIG['captcha_img_selector'], "src")
                     
@@ -211,24 +229,21 @@ def process_single_account(username, password):
                         ocr = ddddocr.DdddOcr(show_ad=False)
                         captcha_text = ocr.classification(img_bytes)
                         
-                        # 判断是否全部为数字
                         if captcha_text.isdigit():
                             print(f"      ✅ 验证码识别成功 (纯数字): {captcha_text}")
-                            captcha_success = True # 将标记改为成功
-                            break # 是纯数字，跳出这 10 次的循环，继续往下执行
+                            captcha_success = True
+                            break
                         else:
                             print(f"      ⚠️ 第 {captcha_attempt + 1} 次识别结果含字母/乱码 ({captcha_text})，点击刷新...")
                             sb.click(CONFIG['captcha_img_selector'])
-                            time.sleep(2) # 等待两秒让新图片加载出来
+                            time.sleep(2)
                     else:
                         print("      ⚠️ 无法获取验证码图片。")
                         break
                 
-                # 检查标记：如果循环了 10 次还是没成功，执行退出操作
                 if not captcha_success:
                     print("    🚨 致命错误：验证码连续 10 次识别失败！程序将直接退出。")
-                    sys.exit(1) # 调用 sys.exit(1) 强制终止整个 Python 脚本
-                # ==================================================
+                    sys.exit(1)
 
                 sb.clear(CONFIG['username_selector'])
                 sb.type(CONFIG['username_selector'], username)
