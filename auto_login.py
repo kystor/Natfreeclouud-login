@@ -346,8 +346,10 @@ def process_single_account(username, password):
                     time.sleep(4) 
                     
                     print("    ▶ 正在生成续费订单...")
-                    sb.wait_for_element(CONFIG['confirm_renew_btn_selector'], timeout=10)
-                    sb.js_click(CONFIG['confirm_renew_btn_selector']) 
+                    # 修改点：用真实点击替代 js_click，确保触发表单提交
+                    sb.wait_for_element_visible(CONFIG['confirm_renew_btn_selector'], timeout=10)
+                    sb.scroll_to(CONFIG['confirm_renew_btn_selector'])
+                    sb.click(CONFIG['confirm_renew_btn_selector'])   # ✅ 真实点击提交按钮
                     time.sleep(5) 
                     
                     print("    ▶ 已调起支付面板，等待确认...")
