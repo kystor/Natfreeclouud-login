@@ -410,25 +410,24 @@ def process_single_account(username, password):
 
                     if not payment_submitted:
                         print("    ⚠️ 普通点击未触发支付，尝试直接调用页面支付函数...")
-                        order_id = sb.execute_script("""
-                            const btn = document.querySelector(arguments[0]);
-                            if (!btn) return '';
-                            const onclickCode = btn.getAttribute('onclick') || '';
-                            const match = onclickCode.match(/payamount\\((\\d+)\\)/);
-                            return match ? match[1] : '';
-                        """, CONFIG['order_pay_btn_selector'])
+                        page_source = sb.get_page_source()
+                        order_match = re.search(
+                            r'id="payamount"[^>]*onclick="javascript:\s*payamount\((\d+)\);?"',
+                            page_source
+                        )
                         clicked_by_script = False
 
-                        if order_id:
+                        if order_match:
+                            order_id = order_match.group(1)
                             print(f"    ▶ 已解析订单号 {order_id}，开始调用 payamount() ...")
-                            sb.execute_script("payamount(arguments[0]);", order_id)
+                            sb.execute_script("window.payamount(arguments[0]);", order_id)
                             clicked_by_script = True
                         else:
-                            print("    ⚠️ 未从按钮中解析到订单号，改用 DOM 原生点击重试...")
-                            sb.execute_script("""
-                                const btn = document.querySelector(arguments[0]);
-                                if (btn) btn.click();
-                            """, CONFIG['order_pay_btn_selector'])
+                            print("    ⚠️ 页面源码里未解析到订单号，改用 DOM 原生点击重试...")
+                            sb.execute_script(
+                                "document.querySelector(arguments[0]) && document.querySelector(arguments[0]).click();",
+                                CONFIG['order_pay_btn_selector']
+                            )
                             clicked_by_script = True
 
                         for _ in range(15):
