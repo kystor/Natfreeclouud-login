@@ -363,18 +363,19 @@ def process_single_account(username, password):
 
                     if not entered_payment_step:
                         print("    ⚠️ 首次点击“立即续费”后页面没有继续，尝试直接提交续费表单...")
-                        sb.execute_script("""
-                            const btn = document.querySelector(arguments[0]);
+                        # 这里也需要避免 arguments，但 selector 不含特殊字符，可以拼接
+                        sb.execute_script(f"""
+                            const btn = document.querySelector('{CONFIG['confirm_renew_btn_selector']}');
                             if (!btn) return false;
                             const form = btn.closest('form');
                             if (!form) return false;
-                            if (typeof form.requestSubmit === 'function') {
+                            if (typeof form.requestSubmit === 'function') {{
                                 form.requestSubmit();
-                            } else {
+                            }} else {{
                                 form.submit();
-                            }
+                            }}
                             return true;
-                        """, CONFIG['confirm_renew_btn_selector'])
+                        """)
 
                         for _ in range(15):
                             if (sb.is_element_present(CONFIG['order_pay_btn_selector']) or
@@ -392,13 +393,14 @@ def process_single_account(username, password):
                     sb.scroll_to(CONFIG['order_pay_btn_selector'])
                     pay_page_url = sb.get_current_url()
 
-                    # ------------------- 支付按钮点击增强 -------------------
+                    # ------------------- 支付按钮点击增强（已修复 arguments 问题） -------------------
                     payment_submitted = False
                     # 策略1：普通 Selenium 点击（处理遮挡）
                     try:
-                        # 先强制元素可点击
-                        sb.execute_script("arguments[0].style.pointerEvents = 'auto';", 
-                                          CONFIG['order_pay_btn_selector'])
+                        # 强制元素可点击（直接使用 #payamount）
+                        sb.execute_script(
+                            "document.querySelector('#payamount').style.pointerEvents = 'auto';"
+                        )
                         sb.click(CONFIG['order_pay_btn_selector'])
                     except:
                         pass
@@ -413,8 +415,9 @@ def process_single_account(username, password):
                     # 策略2：JavaScript 原生点击（绕过事件绑定差异）
                     if not payment_submitted:
                         print("    ⚠️ 普通点击未触发支付，尝试 JS 原生点击...")
-                        sb.execute_script("arguments[0].click();", 
-                                          CONFIG['order_pay_btn_selector'])
+                        sb.execute_script(
+                            "document.querySelector('#payamount').click();"
+                        )
                         for _ in range(5):
                             if sb.get_current_url() != pay_page_url or \
                                "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
@@ -426,14 +429,12 @@ def process_single_account(username, password):
                     if not payment_submitted:
                         print("    ⚠️ JS 点击无效，尝试直接触发按钮的 onclick 事件...")
                         sb.execute_script("""
-                            var btn = arguments[0];
+                            var btn = document.querySelector('#payamount');
                             if (btn && typeof btn.onclick === 'function') {
                                 btn.onclick.call(btn);
                             }
-                        """, CONFIG['order_pay_btn_selector'])
-                        # 等待页面变化 / 新窗口
+                        """)
                         time.sleep(3)
-                        # 检查是否有新窗口打开
                         try:
                             handles = sb.driver.window_handles
                             if len(handles) > 1:
@@ -458,7 +459,6 @@ def process_single_account(username, password):
                         if order_match:
                             order_id = order_match.group(1)
                             print(f"    ▶ 已解析订单号 {order_id}，安全调用 payamount ...")
-                            # 检查函数是否存在，并用数字参数调用（避免字符串类型错误）
                             try:
                                 sb.execute_script(f"""
                                     if (typeof payamount === 'function') {{
@@ -468,7 +468,6 @@ def process_single_account(username, password):
                                     }}
                                 """)
                                 time.sleep(5)
-                                # 再次检查新窗口
                                 handles = sb.driver.window_handles
                                 if len(handles) > 1:
                                     sb.driver.switch_to.window(handles[-1])
