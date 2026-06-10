@@ -363,7 +363,6 @@ def process_single_account(username, password):
 
                     if not entered_payment_step:
                         print("    ⚠️ 首次点击“立即续费”后页面没有继续，尝试直接提交续费表单...")
-                        # 这里也需要避免 arguments，但 selector 不含特殊字符，可以拼接
                         sb.execute_script(f"""
                             const btn = document.querySelector('{CONFIG['confirm_renew_btn_selector']}');
                             if (!btn) return false;
@@ -388,69 +387,42 @@ def process_single_account(username, password):
                     if not entered_payment_step:
                         raise Exception("点击“立即续费”后未进入支付步骤，页面可能没有成功提交，或支付页元素已变更。")
 
-                    print("    ▶ 已进入支付步骤，准备提交支付...")
+                    # ==============================
+                    # 支付步骤核心逻辑（重点修改）
+                    # ==============================
+                    print("    ▶ 已进入支付步骤，正在触发支付弹窗...")
                     sb.wait_for_element_visible(CONFIG['order_pay_btn_selector'], timeout=15)
                     sb.scroll_to(CONFIG['order_pay_btn_selector'])
-                    pay_page_url = sb.get_current_url()
 
-                    # ------------------- 支付按钮点击增强（已修复 arguments 问题） -------------------
-                    payment_submitted = False
-                    # 策略1：普通 Selenium 点击（处理遮挡）
-                    try:
-                        # 强制元素可点击（直接使用 #payamount）
-                        sb.execute_script(
-                            "document.querySelector('#payamount').style.pointerEvents = 'auto';"
-                        )
-                        sb.click(CONFIG['order_pay_btn_selector'])
-                    except:
-                        pass
-
-                    for _ in range(3):
-                        if sb.get_current_url() != pay_page_url or \
-                           "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
-                            payment_submitted = True
-                            break
-                        time.sleep(1)
-
-                    # 策略2：JavaScript 原生点击（绕过事件绑定差异）
-                    if not payment_submitted:
-                        print("    ⚠️ 普通点击未触发支付，尝试 JS 原生点击...")
-                        sb.execute_script(
-                            "document.querySelector('#payamount').click();"
-                        )
-                        for _ in range(5):
-                            if sb.get_current_url() != pay_page_url or \
-                               "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
-                                payment_submitted = True
-                                break
-                            time.sleep(1)
-
-                    # 策略3：触发按钮的 onclick 内联事件（避免全局函数调用崩溃）
-                    if not payment_submitted:
-                        print("    ⚠️ JS 点击无效，尝试直接触发按钮的 onclick 事件...")
-                        sb.execute_script("""
-                            var btn = document.querySelector('#payamount');
-                            if (btn && typeof btn.onclick === 'function') {
-                                btn.onclick.call(btn);
-                            }
-                        """)
-                        time.sleep(3)
+                    # 记录触发前的URL，用于后续判断跳转
+                    pre_pay_url = sb.get_current_url()
+                    
+                    # 1. 点击页面上的“立即支付”按钮 (#payamount) 以弹出模态框
+                    click_success = False
+                    for attempt in range(3):
                         try:
-                            handles = sb.driver.window_handles
-                            if len(handles) > 1:
-                                print("    🪟 检测到新窗口，切换并处理...")
-                                sb.driver.switch_to.window(handles[-1])
-                                payment_submitted = True
+                            # 强制元素可点击并点击
+                            sb.execute_script("document.querySelector('#payamount').style.pointerEvents = 'auto';")
+                            sb.click(CONFIG['order_pay_btn_selector'])
+                            click_success = True
+                            break
                         except:
-                            pass
-                        if not payment_submitted:
-                            if sb.get_current_url() != pay_page_url or \
-                               "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
-                                payment_submitted = True
-
-                    # 策略4：如果以上都失败，最后尝试解析订单号并调用全局函数（加保护）
-                    if not payment_submitted:
-                        print("    ⚠️ 所有点击方式均未触发支付，尝试安全调用全局 payamount 函数...")
+                            time.sleep(1)
+                    
+                    if not click_success:
+                        # 备用：JS原生点击
+                        sb.execute_script("document.querySelector('#payamount').click();")
+                    
+                    # 2. 等待模态框出现，并点击 modal 内的“立即支付”按钮
+                    print("    ▶ 等待支付弹窗出现...")
+                    try:
+                        sb.wait_for_element_visible(CONFIG['modal_pay_btn_selector'], timeout=8)
+                        print("    ✅ 支付弹窗已显示，点击“立即支付”按钮...")
+                        sb.click(CONFIG['modal_pay_btn_selector'])
+                        print("    ▶ 已点击弹窗支付按钮，等待支付处理...")
+                    except:
+                        # 若弹窗未出现，尝试直接调用页面的 payamount 函数（兜底）
+                        print("    ⚠️ 未检测到支付弹窗，尝试直接调用全局支付函数...")
                         page_source = sb.get_page_source()
                         order_match = re.search(
                             r'id="payamount"[^>]*onclick="javascript:\s*payamount\((\d+)\);?"',
@@ -458,30 +430,52 @@ def process_single_account(username, password):
                         )
                         if order_match:
                             order_id = order_match.group(1)
-                            print(f"    ▶ 已解析订单号 {order_id}，安全调用 payamount ...")
+                            sb.execute_script(f"""
+                                if (typeof payamount === 'function') {{
+                                    payamount({order_id});
+                                }}
+                            """)
+                            # 再次尝试检测弹窗
                             try:
-                                sb.execute_script(f"""
-                                    if (typeof payamount === 'function') {{
-                                        payamount({order_id});
-                                    }} else {{
-                                        throw new Error('payamount 函数未定义');
-                                    }}
-                                """)
-                                time.sleep(5)
-                                handles = sb.driver.window_handles
-                                if len(handles) > 1:
-                                    sb.driver.switch_to.window(handles[-1])
-                                    payment_submitted = True
-                                elif sb.get_current_url() != pay_page_url:
-                                    payment_submitted = True
-                            except Exception as func_err:
-                                print(f"    ❌ payamount 调用失败: {func_err}")
-                    # ------------------------------------------------------
-
-                    if not payment_submitted:
-                        raise Exception("所有支付方式均失败，请检查页面状态或手动介入。")
-
-                    print("    ▶ 💸 已提交支付，正在等待系统处理并跳转...")
+                                sb.wait_for_element_visible(CONFIG['modal_pay_btn_selector'], timeout=5)
+                                sb.click(CONFIG['modal_pay_btn_selector'])
+                            except:
+                                pass
+                    
+                    # 3. 等待支付结果：页面跳转、出现成功文字或支付遮罩
+                    payment_success = False
+                    for _ in range(20):
+                        # 检查是否跳转到服务详情页
+                        current_url = sb.get_current_url()
+                        if current_url != pre_pay_url and 'servicedetail' in current_url:
+                            payment_success = True
+                            break
+                        # 检查支付成功遮罩或文字
+                        if "支付成功" in sb.get_page_source() or "Pay Success" in sb.get_page_source():
+                            payment_success = True
+                            break
+                        # 检查可能出现的跳转后页面信息
+                        if "到期时间" in sb.get_page_source():
+                            payment_success = True
+                            break
+                        time.sleep(1)
+                    
+                    if not payment_success:
+                        # 最后再点击一次弹窗按钮（万一之前的点击未生效）
+                        try:
+                            if sb.is_element_visible(CONFIG['modal_pay_btn_selector']):
+                                sb.click(CONFIG['modal_pay_btn_selector'])
+                        except:
+                            pass
+                        time.sleep(5)
+                        # 再次检查
+                        if sb.get_current_url() != pre_pay_url or "支付成功" in sb.get_page_source():
+                            payment_success = True
+                    
+                    if not payment_success:
+                        raise Exception("支付操作后未检测到成功状态，请手动检查。")
+                    
+                    print("    ▶ 💸 支付已提交/完成，等待最终跳转...")
                     time.sleep(8) 
                     take_screenshot(sb, "12_支付完成跳转详情页", username)
                     
