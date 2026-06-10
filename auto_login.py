@@ -409,29 +409,29 @@ def process_single_account(username, password):
                         time.sleep(1)
 
                     if not payment_submitted:
-                        print("    ⚠️ 普通点击未触发支付，尝试直接执行页面支付脚本...")
-                        clicked_by_script = sb.execute_script("""
-                            const btn = document.querySelector(arguments[0]);
-                            if (!btn) return false;
+                        print("    ⚠️ 普通点击未触发支付，尝试直接调用页面支付函数...")
+                        onclick_code = sb.get_attribute(CONFIG['order_pay_btn_selector'], "onclick") or ""
+                        payamount_match = re.search(r"payamount\((\d+)\)", onclick_code)
+                        clicked_by_script = False
 
-                            btn.click();
-
-                            const onclickCode = btn.getAttribute('onclick') || '';
-                            const match = onclickCode.match(/payamount\\((\\d+)\\)/);
-                            if (match && typeof window.payamount === 'function') {
-                                window.payamount(Number(match[1]));
-                                return true;
-                            }
-
-                            if (onclickCode) {
-                                try {
-                                    new Function(onclickCode.replace(/^javascript:/i, ''))();
-                                    return true;
-                                } catch (e) {}
-                            }
-
-                            return true;
-                        """, CONFIG['order_pay_btn_selector'])
+                        if payamount_match:
+                            order_id = payamount_match.group(1)
+                            print(f"    ▶ 已解析订单号 {order_id}，开始调用 payamount() ...")
+                            sb.execute_script(f"payamount({order_id});")
+                            clicked_by_script = True
+                        else:
+                            print("    ⚠️ 未从按钮 onclick 中解析到订单号，改用原生点击事件重试...")
+                            sb.execute_script("""
+                                const btn = document.querySelector(arguments[0]);
+                                if (btn) {
+                                    btn.dispatchEvent(new MouseEvent('click', {
+                                        bubbles: true,
+                                        cancelable: true,
+                                        view: window
+                                    }));
+                                }
+                            """, CONFIG['order_pay_btn_selector'])
+                            clicked_by_script = True
 
                         for _ in range(15):
                             if sb.get_current_url() != pay_page_url:
