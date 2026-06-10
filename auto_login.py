@@ -395,7 +395,7 @@ def process_single_account(username, password):
                     sb.click(CONFIG['order_pay_btn_selector'])
 
                     payment_submitted = False
-                    for _ in range(15):
+                    for _ in range(5):
                         if sb.get_current_url() != pay_page_url:
                             payment_submitted = True
                             break
@@ -409,7 +409,48 @@ def process_single_account(username, password):
                         time.sleep(1)
 
                     if not payment_submitted:
-                        raise Exception("点击“立即支付”后页面没有继续跳转，也没有出现确认按钮。")
+                        print("    ⚠️ 普通点击未触发支付，尝试直接执行页面支付脚本...")
+                        clicked_by_script = sb.execute_script("""
+                            const btn = document.querySelector(arguments[0]);
+                            if (!btn) return false;
+
+                            btn.click();
+
+                            const onclickCode = btn.getAttribute('onclick') || '';
+                            const match = onclickCode.match(/payamount\\((\\d+)\\)/);
+                            if (match && typeof window.payamount === 'function') {
+                                window.payamount(Number(match[1]));
+                                return true;
+                            }
+
+                            if (onclickCode) {
+                                try {
+                                    new Function(onclickCode.replace(/^javascript:/i, ''))();
+                                    return true;
+                                } catch (e) {}
+                            }
+
+                            return true;
+                        """, CONFIG['order_pay_btn_selector'])
+
+                        for _ in range(15):
+                            if sb.get_current_url() != pay_page_url:
+                                payment_submitted = True
+                                break
+                            if sb.is_element_visible(CONFIG['modal_pay_btn_selector']):
+                                sb.click(CONFIG['modal_pay_btn_selector'])
+                                payment_submitted = True
+                                break
+                            if "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
+                                payment_submitted = True
+                                break
+                            time.sleep(1)
+
+                        if not clicked_by_script and not payment_submitted:
+                            raise Exception("订单页未找到可执行的支付按钮脚本。")
+
+                    if not payment_submitted:
+                        raise Exception("点击“立即支付”后页面没有继续跳转，支付脚本也没有产生可见结果。")
 
                     print("    ▶ 💸 已提交支付，正在等待系统处理并跳转...")
                     
