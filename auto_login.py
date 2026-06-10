@@ -33,7 +33,7 @@ CONFIG = {
     "server_list_url": "https://nat.freecloud.ltd/service?groupid=305", 
     "server_checkbox_selector": '.row-checkbox',              
     "list_renew_btn_selector": '#readBtn',                    
-    "confirm_renew_btn_selector": '.xfSubmit',          
+    "confirm_renew_btn_selector": 'button.xfSubmit[type="submit"]',
     "order_pay_btn_selector": '#payamount',                   
     "modal_pay_btn_selector": 'button.pay-now'                
 }
@@ -346,18 +346,53 @@ def process_single_account(username, password):
                     time.sleep(4) 
                     
                     print("    ▶ 正在生成续费订单...")
-                    # 修改点：用真实点击替代 js_click，确保触发表单提交
                     sb.wait_for_element_visible(CONFIG['confirm_renew_btn_selector'], timeout=10)
                     sb.scroll_to(CONFIG['confirm_renew_btn_selector'])
-                    sb.click(CONFIG['confirm_renew_btn_selector'])   # ✅ 真实点击提交按钮
-                    time.sleep(5) 
-                    
-                    print("    ▶ 已调起支付面板，等待确认...")
-                    sb.wait_for_element(CONFIG['order_pay_btn_selector'], timeout=15)
-                    sb.js_click(CONFIG['order_pay_btn_selector']) 
-                    
+
+                    current_url = sb.get_current_url()
+                    sb.click(CONFIG['confirm_renew_btn_selector'])
+
+                    entered_payment_step = False
+                    for _ in range(8):
+                        if (sb.is_element_present(CONFIG['order_pay_btn_selector']) or
+                            sb.is_element_present(CONFIG['modal_pay_btn_selector']) or
+                            sb.get_current_url() != current_url):
+                            entered_payment_step = True
+                            break
+                        time.sleep(1)
+
+                    if not entered_payment_step:
+                        print("    ⚠️ 首次点击“立即续费”后页面没有继续，尝试直接提交续费表单...")
+                        sb.execute_script("""
+                            const btn = document.querySelector(arguments[0]);
+                            if (!btn) return false;
+                            const form = btn.closest('form');
+                            if (!form) return false;
+                            if (typeof form.requestSubmit === 'function') {
+                                form.requestSubmit();
+                            } else {
+                                form.submit();
+                            }
+                            return true;
+                        """, CONFIG['confirm_renew_btn_selector'])
+
+                        for _ in range(15):
+                            if (sb.is_element_present(CONFIG['order_pay_btn_selector']) or
+                                sb.is_element_present(CONFIG['modal_pay_btn_selector']) or
+                                sb.get_current_url() != current_url):
+                                entered_payment_step = True
+                                break
+                            time.sleep(1)
+
+                    if not entered_payment_step:
+                        raise Exception("点击“立即续费”后未进入支付步骤，页面可能没有成功提交，或支付页元素已变更。")
+
+                    print("    ▶ 已进入支付步骤，等待确认...")
+                    if sb.is_element_present(CONFIG['order_pay_btn_selector']):
+                        sb.js_click(CONFIG['order_pay_btn_selector'])
+
                     sb.wait_for_element(CONFIG['modal_pay_btn_selector'], timeout=10)
-                    sb.js_click(CONFIG['modal_pay_btn_selector']) 
+                    sb.js_click(CONFIG['modal_pay_btn_selector'])
                     print("    ▶ 💸 已在弹窗中确认支付，正在等待系统处理并跳转...")
                     
                     time.sleep(8) 
