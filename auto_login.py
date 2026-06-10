@@ -387,13 +387,31 @@ def process_single_account(username, password):
                     if not entered_payment_step:
                         raise Exception("点击“立即续费”后未进入支付步骤，页面可能没有成功提交，或支付页元素已变更。")
 
-                    print("    ▶ 已进入支付步骤，等待确认...")
-                    if sb.is_element_present(CONFIG['order_pay_btn_selector']):
-                        sb.js_click(CONFIG['order_pay_btn_selector'])
+                    print("    ▶ 已进入支付步骤，准备提交支付...")
+                    sb.wait_for_element_visible(CONFIG['order_pay_btn_selector'], timeout=15)
+                    sb.scroll_to(CONFIG['order_pay_btn_selector'])
 
-                    sb.wait_for_element(CONFIG['modal_pay_btn_selector'], timeout=10)
-                    sb.js_click(CONFIG['modal_pay_btn_selector'])
-                    print("    ▶ 💸 已在弹窗中确认支付，正在等待系统处理并跳转...")
+                    pay_page_url = sb.get_current_url()
+                    sb.click(CONFIG['order_pay_btn_selector'])
+
+                    payment_submitted = False
+                    for _ in range(15):
+                        if sb.get_current_url() != pay_page_url:
+                            payment_submitted = True
+                            break
+                        if sb.is_element_visible(CONFIG['modal_pay_btn_selector']):
+                            sb.click(CONFIG['modal_pay_btn_selector'])
+                            payment_submitted = True
+                            break
+                        if "已支付" in sb.get_page_source() or "支付成功" in sb.get_page_source():
+                            payment_submitted = True
+                            break
+                        time.sleep(1)
+
+                    if not payment_submitted:
+                        raise Exception("点击“立即支付”后页面没有继续跳转，也没有出现确认按钮。")
+
+                    print("    ▶ 💸 已提交支付，正在等待系统处理并跳转...")
                     
                     time.sleep(8) 
                     take_screenshot(sb, "12_支付完成跳转详情页", username)
