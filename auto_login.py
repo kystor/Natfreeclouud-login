@@ -420,7 +420,8 @@ def process_single_account(username, password):
                         if order_match:
                             order_id = order_match.group(1)
                             print(f"    ▶ 已解析订单号 {order_id}，开始调用 payamount() ...")
-                            sb.execute_script("window.payamount(arguments[0]);", order_id)
+                            # 修复：使用 sb.driver.execute_script 避免 arguments is not defined
+                            sb.driver.execute_script(f"window.payamount('{order_id}');")
                             clicked_by_script = True
                         else:
                             print("    ⚠️ 页面源码里未解析到订单号，改用 DOM 原生点击重试...")
