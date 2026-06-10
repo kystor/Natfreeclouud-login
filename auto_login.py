@@ -410,26 +410,24 @@ def process_single_account(username, password):
 
                     if not payment_submitted:
                         print("    ⚠️ 普通点击未触发支付，尝试直接调用页面支付函数...")
-                        onclick_code = sb.get_attribute(CONFIG['order_pay_btn_selector'], "onclick") or ""
-                        payamount_match = re.search(r"payamount\((\d+)\)", onclick_code)
+                        order_id = sb.execute_script("""
+                            const btn = document.querySelector(arguments[0]);
+                            if (!btn) return '';
+                            const onclickCode = btn.getAttribute('onclick') || '';
+                            const match = onclickCode.match(/payamount\\((\\d+)\\)/);
+                            return match ? match[1] : '';
+                        """, CONFIG['order_pay_btn_selector'])
                         clicked_by_script = False
 
-                        if payamount_match:
-                            order_id = payamount_match.group(1)
+                        if order_id:
                             print(f"    ▶ 已解析订单号 {order_id}，开始调用 payamount() ...")
-                            sb.execute_script(f"payamount({order_id});")
+                            sb.execute_script("payamount(arguments[0]);", order_id)
                             clicked_by_script = True
                         else:
-                            print("    ⚠️ 未从按钮 onclick 中解析到订单号，改用原生点击事件重试...")
+                            print("    ⚠️ 未从按钮中解析到订单号，改用 DOM 原生点击重试...")
                             sb.execute_script("""
                                 const btn = document.querySelector(arguments[0]);
-                                if (btn) {
-                                    btn.dispatchEvent(new MouseEvent('click', {
-                                        bubbles: true,
-                                        cancelable: true,
-                                        view: window
-                                    }));
-                                }
+                                if (btn) btn.click();
                             """, CONFIG['order_pay_btn_selector'])
                             clicked_by_script = True
 
